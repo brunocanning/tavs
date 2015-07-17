@@ -55,6 +55,15 @@ elif [ -x /usr/local/bin/arcconf ]; then
   for logdev in $(arcconf getconfig 1 ld | grep 'Logical device number' | cut -f 4 -d" "); do
     $CLI task start 1 logicaldrive $logdev verify noprompt
   done
+elif [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]
+  CLI="/opt/MegaRAID/MegaCli/MegaCli64"
+  # LSI RAID Controller
+  # Make sure the time is set correctly
+  # Some new drives are preconfigured with the wrong time zone
+  $CLI -AdpSetTime 'date +%Y%m%d' 'date +%H:%H:%S' -aALL -NoLog
+  #Schedule an immediate consistency check on all arrays
+  $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL
+  done
 else
   echo "Could not find a working CLI"
   exit 1
