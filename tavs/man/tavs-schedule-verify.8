@@ -1,0 +1,67 @@
+.\" Process this file with
+.\" groff -man -Tascii tavs-schedule-verify.8
+.\"
+.TH TAVS-SCHEDULE-VERIFY 8 "JUNE 2009" Linux "System Utilities"
+.SH NAME
+tavs-schedule-verify - Schedule verifies on disk servers
+.SH SYNOPSIS
+.B tavs-schedule-verify [-d] [-h|-?] [-S] [-f] [-n
+.I host-name
+.B ]
+.SH DESCRIPTION
+.B tavs-schedule-verify
+connects to the Tier1 disk server database (OverWatch) to check when the host's RAID arrays were last verified.  If they were last verified more than 28 days ago then it attempts to invoke
+.BR tavs-start-verifies (8)
+to start verifies on all arrays in the system.
+
+.B tavs-schedule-verify
+writes useful info to syslog at a priority of local0.info or local0.err (see
+.BR logger (1)
+for more information on syslog priorities).
+.SH OPTIONS
+.IP -d
+Turn on debugging messages to STDERR.
+.IP "-h, -?"
+Display usage and exit.
+.IP "-S"
+Do not sleep before contacting the database.  By default,
+.B tavs-schedule-verify
+will sleep before contacting the database server.  The sleep period is based on the numerical portion of the hostname.  This option avoids this sleep and is useful when running interactively.
+.IP "-f"
+Forces a verify.  The database will be updated with the new verify date.  Assumes
+.B -S
+.IP "-n host-name"
+Override the auto-detected host name and use
+.I host-name
+instead.  This should be the short host name and not the FQDN.
+.SH FILES
+.I /etc/sysconfig/pgsql/pg_service.conf
+.RS
+Specifies the connection parameters to the OverWatch database.
+.RE
+.SH ENVIRONMENT
+No environment variables affect this command.
+.SH DIAGNOSTICS
+A variety of messages may be issued on std error and to syslog.  The exit code will be set appropriately too:
+
+Cannot determine host name, please specify a host name with '-n'
+.RS
+The host name could not be determined automatically and one wasn't specified with -n.
+.RE
+Could not connect to database
+.RS
+A connection to the database specified in
+.I /etc/tavs/pg_service.conf
+could not be made.
+.RE
+Could not prepare/execute ... query
+.RS
+There was a problem executing the specified query
+.RE
+.SH BUGS
+None found yet but that doesn't mean that there aren't any!  Report them to the author.
+.SH AUTHOR
+James Thorne <james.thorne@stfc.ac.uk>
+.SH SEE ALSO
+.BR tavs (8),
+.BR tavs-start-verifies (8)

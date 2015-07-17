@@ -1,0 +1,61 @@
+  #!/usr/bin/env bash
+#
+# tavs-start-verifies
+# -------------------
+#
+# Script that uses tw_cli to start verifies
+#
+# Usage:
+#   tavs-start-verifies
+#
+  
+if [ -x /sbin/tw_cli ]; then
+  CLI=/sbin/tw_cli
+  for cntlr in $($CLI info | grep -e "^c[0-9]"  | cut -f1 -d" "); do
+    # delete all schedule slots in the verify schedule
+    for slot in $(seq 1 7); do
+      $CLI /$cntlr del verify=$slot
+    done
+  
+    # Setup verify schedule.  This is Monday 11.00 to Thursday 12.00
+    $CLI /$cntlr add verify=Mon:11:13
+    $CLI /$cntlr add verify=Tue:00:24
+    $CLI /$cntlr add verify=Wed:00:24
+    $CLI /$cntlr add verify=Thu:00:12
+  
+    # enable the verify schedule above
+    $CLI /$cntlr set verify=enable
+    # run verifies at priority=5 (Fastest I/O)
+    $CLI /$cntlr set verify=5
+  
+    # start a verify on each unit, may need to exclude hot spares here.
+    for unit in $($CLI info $cntlr | grep -e "^u[0-9]" | cut -f1 -d " "); do
+      # Ensure autoverify is off
+      $CLI /$cntlr/$unit set autoverify=off
+      # Start verify
+      $CLI /${cntlr}/${unit} start verify
+    done
+  done
+  exit 0
+elif [ -x /sbin/areca_cli ]; then
+  CLI="/sbin/areca_cli"
+  # can only verify RAID3, 5 and 6 on the areca machines
+  for vol in $($CLI vsf info | grep -i raid6 | cut -f3 -d" "); do
+    # simpler on arecas as they do not have scheduling policy
+    # although we do have to set the password before starting
+    $CLI set password=0000
+    $CLI vsf check vol=${vol}
+  done
+  exit 0
+elif [ -x /usr/local/bin/arcconf ]; then
+  CLI="/usr/local/bin/arcconf"
+  # Adaptec controller:
+  # Set background tsk priority to low:
+  $CLI setpriority 1 LOW
+  for logdev in $(arcconf getconfig 1 ld | grep 'Logical device number' | cut -f 4 -d" "); do
+    $CLI task start 1 logicaldrive $logdev verify noprompt
+  done
+else
+  echo "Could not find a working CLI"
+  exit 1
+fi

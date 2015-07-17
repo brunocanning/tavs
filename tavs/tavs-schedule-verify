@@ -1,0 +1,217 @@
+#!/usr/bin/perl -w
+
+# tave-schedule-verify.pl
+# -----------------------
+# 
+# Part of the TAVS suite.
+#
+# Script to query OverWatch and, if necessary, run a verify.
+#
+# This script is maintained in the eScience subversion repository and any
+# changes should be committed there.
+#
+# Original author: James Thorne <james.thorne@stfc.ac.uk>
+#
+# (c) Science and Technology Facilities Council
+
+use strict;
+use DBI;
+use Getopt::Std;
+use Sys::Syslog;
+use Date::Simple ('today');
+use Sys::Hostname;
+
+### VARIABLES AND CONSTANTS ###
+
+my $BINDIR = "/usr/local/sbin";
+my $START_SCRIPT = "$BINDIR/tavs-start-verifies";
+
+# Setting $ENV{PGSYSCONFDIR} has no effect in SL4 as it has old version of
+# DBD::Pg
+#$ENV{PGSYSCONFDIR} = '/usr/local/etc';  # location of pg_service.conf
+                                       
+$ENV{PGSERVICE} = 'overwatch';  # 'service' as defined in pg_service.conf
+
+my $today = today();
+my $hostname;
+my $hostnum;
+my $connectDelay;
+my %opts;
+my $DEBUG;
+my $dbh;
+my $sth;
+my $verifyLimit;
+my $rowHashRef;
+my $oldestHosts;
+
+### PROGRAM ###
+
+# set up the syslog connection
+openlog("tavs","cons,pid","local0");
+
+# get command line options, sets %opts
+#   -d             : debug
+#   -f             : force verify and update DB.  Useful after intervention.
+#   -n <host name> : short host name (optional, script will guess it otherwise)
+#   -S             : Do not sleep before contacting DB.
+#   -h, -?         : display usage and exit
+getopts('?dfhSn:', \%opts);
+
+# If the user asked for help, display it and exit.
+if ( $opts{'?'} || $opts{'h'} ) {
+  usage();
+}
+
+# debug?
+if ( $opts{'d'} ) {
+  $DEBUG = 1;
+}
+
+dbg("Debugging is turned on");
+
+# If no host name given and we cannot determine it then we should die gracefully
+unless ( ($hostname = $opts{'n'}) || ($hostname = (split( /\./, hostname()))[0]) ) {
+  gracefulDeath("Cannot determine host name, please specify a host name with '-n'", 100);
+}
+
+# if -f was specified then just start a verify and update the database.
+if( $opts{'f'} ) {
+  verify($hostname, "-f specified, forcing verify and updating database");
+  exit 0;
+}
+
+# If we're running normally, we need to sleep for a while to avoid overloading
+# the DB, unless the -S option was specified (no sleep).
+unless( $opts{'S'} ) {
+  $hostnum = $hostname;
+  $hostnum =~ s/[^0-9]//g;
+  $connectDelay = int ($hostnum / 4);
+  dbg("Sleeping for $connectDelay seconds to avoid loading the DB...");
+  sleep $connectDelay;
+}
+
+dbg("Today's date is $today");
+dbg("My hostname is $hostname");
+
+# Connect to the database
+dbg("Connecting to the database");
+$dbh = DBI->connect("dbi:Pg:", '', '') || gracefulDeath("Could not connect to database", 201);
+
+# Find out verifyLimit (= number of servers to verify concurrently)
+dbg("Running verifyLimit query");
+# prepare query
+$sth = $dbh->prepare(qq{
+  SELECT ( COUNT("diskPool") / 5 ) AS "verifyLimit" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = ?)
+}) || gracefulDeath("Could not prepare verifyLimit query", 202);
+# execute query
+$sth->execute("$hostname") || gracefulDeath("Could not execute verifyLimit query", 203);
+
+# get result and set the limit on the number of concurrent verifies
+$rowHashRef = $sth->fetchrow_hashref;
+$verifyLimit = $rowHashRef->{'verifyLimit'};
+
+# verifyLimit must be at least 1
+if ( $verifyLimit == 0 ) {
+  dbg("verifyLimit is zero, shifting to 1");
+  $verifyLimit++;
+}
+dbg("verifyLimit:\t$verifyLimit");
+
+# Find the hosts that have not been verified for the longest in this machine's
+# disk pool, restricted to $verifyLimit.  We only want to know the hosts that
+# haven't been verified in the last 28 days (...AND ? - "lastVerified" > 28...).
+# We also need to ignore machines in intervention/retired or they will
+# eventually block the verify list.
+dbg("Running find oldest query");
+$sth = $dbh->prepare(qq{
+  SELECT "machineName", "diskPool", "lastVerified", "storageSystemId" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = ?) AND "currentStatus" <> 'Intervention' AND "currentStatus" <> 'Retired' AND ? - "lastVerified" > 28 ORDER BY "lastVerified" ASC LIMIT ?
+}) || gracefulDeath("Could not prepare find oldest query", 204);
+
+$sth->execute("$hostname", "$today", "$verifyLimit") || gracefulDeath("Could not execute find oldest query", 205);
+
+# get the results of the query
+$oldestHosts = $sth->fetchall_hashref("machineName");
+
+# loop through each row of the results by host name.
+CHECK_VERIFY: foreach my $host ( keys( %{$oldestHosts} ) ) {
+  dbg("$host | $oldestHosts->{$host}->{diskPool} | $oldestHosts->{$host}->{lastVerified}");
+
+  # If this host's name is in the list then verify
+  if( "$host" eq "$hostname" ) {
+    verify($host, $oldestHosts->{$host}->{lastVerified},$oldestHosts->{$host}->{storageSystemId});
+    last CHECK_VERIFY;
+  }
+}
+exit 0;
+
+### SUBROUTINES ###
+
+# verify("hostname", "reason", "storageSystemId" ) - run verifies and update database
+sub verify {
+    my $verifyHost = shift;
+    my $reason = shift;
+    my $storageSystemId = shift;
+
+    dbg("Time to verify");
+    dbg("Starting verifies:\t\"$START_SCRIPT\"");
+    # send info on decision to syslog
+    syslog('info', "$reason");
+    # execute the verify command
+    system("$START_SCRIPT");
+
+    # If the start verify worked, then update the last verified date
+    if( $? == 0 ) {
+      dbg("Started verifies on $verifyHost");
+      syslog('info', "Started verifies on $verifyHost");
+      # insert updated last verified date into the database
+      # Have to have a DBI->connect here for SL5 or prepare fails.  Seemed
+      # to work on SL4.  New Perl Version?  This code tested on SL4 and it
+      # works OK.
+      dbg("Connecting to the database");
+      $dbh = DBI->connect("dbi:Pg:", '', '') || gracefulDeath("Could not connect to database", 201);
+      $sth = $dbh->prepare(qq{
+        UPDATE "storageSystems" SET "lastVerified" = ? WHERE "id" = ?
+      }) || gracefulDeath("Could not prepare verify date update query", 206);
+      $sth->execute("$today", $storageSystemId) || gracefulDeath("Could not execute verify date update query", 207);
+
+    }
+    else {
+      gracefulDeath("Error starting verifies on $hostname", 208);
+    }
+}
+
+# usage() - prints usage message and exits
+sub usage {
+  print "tavs-schedule-verify usage:\n";
+  print "  -d             : turn on debug messages\n";
+  print "  -f             : force verify and update DB.  Useful after intervention.\n";
+  print "  -n <host name> : short host name (optional, script will guess it otherwise)\n";
+  print "  -S             : Do not sleep before contacting DB.  Use when run interactively.\n";
+  print "  -h, -?         : display this usage message and exit.\n\n";
+
+  exit 1;
+}
+
+# dbg() - prints message to standard error if debugging is on
+sub dbg {
+  if ( $DEBUG ) {
+    # print to STDERR
+    select(STDERR);
+    print "----\n";
+    print "$_[0]\n";
+    print "----\n";
+    # select STDOUT again, just in case.
+    select(STDOUT);
+  }
+}
+
+# gracefulDeath() - print message to STDERR and then exit with given exit code
+sub gracefulDeath {
+  # print to STDERR
+  select(STDERR);
+  print "----\n";
+  print "$_[0]\n";
+  print "----\n";
+  syslog('err', "$_[0]");
+  exit $_[1];
+}

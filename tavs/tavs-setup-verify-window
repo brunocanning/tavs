@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# tavs-setup-verify-window
+# ------------------------
+#
+# Script that uses tw_cli to set up verify schedules on Viglen disk servers.
+#
+
+CLI="/sbin/tw_cli"
+
+if [ -x $CLI  ]; then
+  for cntlr in $(tw_cli info | grep -e "^c[0-9]"  | cut -f1 -d" "); do
+    # delete all schedule slots in the verify schedule
+    for slot in $(seq 1 7); do
+      $CLI /$cntlr del verify=$slot
+    done
+
+    # add verify slots.  This will add Monday at 09.00 to Wednesday at 14.00
+    $CLI /$cntlr add verify=Mon:09:15
+    $CLI /$cntlr add verify=Tue:00:24
+    $CLI /$cntlr add verify=Wed:00:14
+
+    # enable scheduled verifies at priority 5 (fastet I/O)
+    $CLI /$cntlr set verify=enable
+    $CLI /$cntlr set verify=5
+
+    # display the schedule
+    $CLI /$cntlr show verify
+
+    # Turn on auto verify for all units.
+    for unit in $(tw_cli info $cntlr | grep -e "^u[0-9]"  | cut -f1 -d" "); do
+      $CLI /$cntlr/$unit set autoverify=on
+      $CLI /$cntlr/$unit show autoverify
+    done
+  done
+else
+  echo "$CLI is not executable"
+fi

@@ -1,0 +1,20 @@
+.\" Process this file with
+.\" groff -man -Tascii tavs-start-verifies.8
+.\"
+.TH TAVS-START-VERIFIES 8 "JUNE 2010" Linux "System Utilities"
+.SH NAME
+tavs-start-verifies - Start verifies on disk servers
+.SH SYNOPSIS
+.B tavs-start-verifies
+.SH DESCRIPTION
+.B tavs-start-verifies
+looks for a suitable RAID controller CLI and uses that to start verifies on every logical device on the controller.  This script is usually invoked by
+.BR tavs-schedule-verify (8)
+
+.SH DIAGNOSTICS
+A variety of messages may be issued on std error, most likely from the command line tools.
+.SH AUTHOR
+James Thorne <james.thorne@stfc.ac.uk>
+.SH SEE ALSO
+.BR tavs (8),
+.BR tavs-schedule-verify (8)

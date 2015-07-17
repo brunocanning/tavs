@@ -1,0 +1,4 @@
+# schedule verifies on disk servers.  Run weekly on Monday at 11.15
+# This file is provided by RPM and should be in /etc/cron.d/
+#
+15 11 * * 1 root /usr/local/sbin/tavs-schedule-verify > /dev/null
