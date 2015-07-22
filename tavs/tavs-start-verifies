@@ -60,9 +60,9 @@ elif [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
   # LSI RAID Controller
   # Make sure the time is set correctly
   # Some new drives are preconfigured with the wrong time zone
-  $CLI -AdpSetTime 'date +%Y%m%d' 'date +%H:%H:%S' -aALL -NoLog
+  $CLI -AdpSetTime $(date +%Y%m%d) $(date +%H:%H:%S) -aALL -NoLog
   #Schedule an immediate consistency check on all arrays
-  $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL
+  $CLI -AdpCcSched -SetSTartTime $(date +%Y%m%d) $(date +%H) -aALL
 else
   echo "Could not find a working CLI"
   exit 1
