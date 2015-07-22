@@ -7,211 +7,163 @@
 #
 # Script to query OverWatch and, if necessary, run a verify.
 #
-# This script is maintained in the eScience subversion repository and any
-# changes should be committed there.
-#
 # Original author: James Thorne <james.thorne@stfc.ac.uk>
+# Update for LSI RAID cards and Python conversion: George Christian
 #
 # (c) Science and Technology Facilities Council
 
-use strict;
-use DBI;
-use Getopt::Std;
-use Sys::Syslog;
-use Date::Simple ('today');
-use Sys::Hostname;
+import sys
+import getopt
+import os
+import time
+import psycopg2
+import syslog
+import socket
 
-### VARIABLES AND CONSTANTS ###
+### CONSTANTS ###
 
-my $BINDIR = "/usr/local/sbin";
-my $START_SCRIPT = "$BINDIR/tavs-start-verifies";
-
-# Setting $ENV{PGSYSCONFDIR} has no effect in SL4 as it has old version of
-# DBD::Pg
-#$ENV{PGSYSCONFDIR} = '/usr/local/etc';  # location of pg_service.conf
-                                       
-$ENV{PGSERVICE} = 'overwatch';  # 'service' as defined in pg_service.conf
-
-my $today = today();
-my $hostname;
-my $hostnum;
-my $connectDelay;
-my %opts;
-my $DEBUG;
-my $dbh;
-my $sth;
-my $verifyLimit;
-my $rowHashRef;
-my $oldestHosts;
+BINDIR = "/usr/local/sbin";
+START_SCRIPT = BINDIR + "/tavs-start-verifies";
 
 ### PROGRAM ###
 
-# set up the syslog connection
-openlog("tavs","cons,pid","local0");
+def main():
+  ### LOCAL VARIABLES ###
+  today = time.strftime("%d%m%Y")
 
-# get command line options, sets %opts
-#   -d             : debug
-#   -f             : force verify and update DB.  Useful after intervention.
-#   -n <host name> : short host name (optional, script will guess it otherwise)
-#   -S             : Do not sleep before contacting DB.
-#   -h, -?         : display usage and exit
-getopts('?dfhSn:', \%opts);
+  hostname = ""
+  username = ""
+  password = ""
+  dbname = ""
+  machineName = ""
+  DEBUG = False
+  noSleep = False
+  verifyLimit = 0
 
-# If the user asked for help, display it and exit.
-if ( $opts{'?'} || $opts{'h'} ) {
-  usage();
-}
+  # Read the configuration file
+  filepath = ""
+  if os.path.isfile("pg_service.conf"):
+    filepath = "pg_service.conf"
+  elif os.path.isfile("/usr/local/etc/pg_service.conf"):
+    filepath = "/usr/local/etc/pg_service.conf"
+  else:
+    gracefulDeath("Unable to find configuration file pg_service.conf", 1)
 
-# debug?
-if ( $opts{'d'} ) {
-  $DEBUG = 1;
-}
+  config = open(filepath, "r")
+  for line in config:
+    entry = line.split('=', 1)
+    if entry[0] == "host": hostname = entry[1].rstrip()
+    elif entry[0] == "user": username = entry[1].rstrip()
+    elif entry[0] == "password": password = entry[1].rstrip()
+    elif entry[0] == "port": port = entry[1].rstrip()
+    elif entry[0] == "dbname": dbname = entry[1].rstrip()
 
-dbg("Debugging is turned on");
+  config.close()
 
-# If no host name given and we cannot determine it then we should die gracefully
-unless ( ($hostname = $opts{'n'}) || ($hostname = (split( /\./, hostname()))[0]) ) {
-  gracefulDeath("Cannot determine host name, please specify a host name with '-n'", 100);
-}
+  # get command line options
+  #   -d             : debug
+  #   -f             : force verify and update DB.  Useful after intervention.
+  #   -S             : Do not sleep before contacting DB.
+  #   -n             : The machine to run verifies on
+  #   -h, -?         : display usage and exit
+  lastOpt = ""
+  for opt in sys.argv[1:]:
+    if opt in ("-h", "-?"):
+      usage()
+      sys.exit(1)
+    elif opt == "-d":
+      DEBUG = True
+      dbg("Debugging is turned on", DEBUG);
+    elif opt == "-f":
+      verify(hostname, "-f specified, forcing verify and updating database", "")
+      sys.exit(0)
+    elif opt == "-S":
+      noSleep = True
+    elif opt == "-n":
+      lastOpt = opt
+      continue
+    elif lastOpt == "-n":
+      machineName = opt
+    else:
+      gracefulDeath("Invalid option passed at the command line", 1)
+      usage()
 
-# if -f was specified then just start a verify and update the database.
-if( $opts{'f'} ) {
-  verify($hostname, "-f specified, forcing verify and updating database");
-  exit 0;
-}
+    lastOpt = opt
 
-# If we're running normally, we need to sleep for a while to avoid overloading
-# the DB, unless the -S option was specified (no sleep).
-unless( $opts{'S'} ) {
-  $hostnum = $hostname;
-  $hostnum =~ s/[^0-9]//g;
-  $connectDelay = int ($hostnum / 4);
-  dbg("Sleeping for $connectDelay seconds to avoid loading the DB...");
-  sleep $connectDelay;
-}
+  if machineName == "":
+    machineName = socket.gethostname().split(".", 1)[0]
 
-dbg("Today's date is $today");
-dbg("My hostname is $hostname");
+  dbg("Today's date is %s" % time.strftime("%d/%m/%Y"), DEBUG)
+  dbg("My hostname is %s" % machineName, DEBUG)
 
-# Connect to the database
-dbg("Connecting to the database");
-$dbh = DBI->connect("dbi:Pg:", '', '') || gracefulDeath("Could not connect to database", 201);
+  if noSleep == False:
+    # If we're running normally, we need to sleep for a while to avoid overloading
+    # the DB, unless the -S option was specified (no sleep).
+    dbg("Sleeping for 5 seconds to avoid loading the DB...", DEBUG)
+    time.sleep(5)
 
-# Find out verifyLimit (= number of servers to verify concurrently)
-dbg("Running verifyLimit query");
-# prepare query
-$sth = $dbh->prepare(qq{
-  SELECT ( COUNT("diskPool") / 5 ) AS "verifyLimit" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = ?)
-}) || gracefulDeath("Could not prepare verifyLimit query", 202);
-# execute query
-$sth->execute("$hostname") || gracefulDeath("Could not execute verifyLimit query", 203);
+  # Connect to the database
+  dbg("Connecting to the database", DEBUG)
+  connection = psycopg2.connect("dbname=%s user=%s password=%s host=%s" % (dbname, username, password, hostname))
+  cur = connection.cursor()
 
-# get result and set the limit on the number of concurrent verifies
-$rowHashRef = $sth->fetchrow_hashref;
-$verifyLimit = $rowHashRef->{'verifyLimit'};
+  cur.execute('SELECT ( COUNT ("diskPool") / 5 ) AS "verifyLimit" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s);', (machineName, ))
+  verifyLimit = cur.fetchone()[0]
 
-# verifyLimit must be at least 1
-if ( $verifyLimit == 0 ) {
-  dbg("verifyLimit is zero, shifting to 1");
-  $verifyLimit++;
-}
-dbg("verifyLimit:\t$verifyLimit");
+  dbg("verifyLimit:\t %i" % verifyLimit, DEBUG)
 
-# Find the hosts that have not been verified for the longest in this machine's
-# disk pool, restricted to $verifyLimit.  We only want to know the hosts that
-# haven't been verified in the last 28 days (...AND ? - "lastVerified" > 28...).
-# We also need to ignore machines in intervention/retired or they will
-# eventually block the verify list.
-dbg("Running find oldest query");
-$sth = $dbh->prepare(qq{
-  SELECT "machineName", "diskPool", "lastVerified", "storageSystemId" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = ?) AND "currentStatus" <> 'Intervention' AND "currentStatus" <> 'Retired' AND ? - "lastVerified" > 28 ORDER BY "lastVerified" ASC LIMIT ?
-}) || gracefulDeath("Could not prepare find oldest query", 204);
+  # get result and set the limit on the number of concurrent verifies
+  # verifyLimit must be at least 1
+  if verifyLimit == 0:
+    dbg("verifyLimit is zero, shifting to 1", DEBUG)
+    verifyLimit += 1
 
-$sth->execute("$hostname", "$today", "$verifyLimit") || gracefulDeath("Could not execute find oldest query", 205);
-
-# get the results of the query
-$oldestHosts = $sth->fetchall_hashref("machineName");
-
-# loop through each row of the results by host name.
-CHECK_VERIFY: foreach my $host ( keys( %{$oldestHosts} ) ) {
-  dbg("$host | $oldestHosts->{$host}->{diskPool} | $oldestHosts->{$host}->{lastVerified}");
-
-  # If this host's name is in the list then verify
-  if( "$host" eq "$hostname" ) {
-    verify($host, $oldestHosts->{$host}->{lastVerified},$oldestHosts->{$host}->{storageSystemId});
-    last CHECK_VERIFY;
-  }
-}
-exit 0;
+  cur.execute('SELECT "machineName", "diskPool", "lastVerified", "storageSystemId" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s AND "currentStatus" <> \'Intervention\' AND "currentStatus" <> \'Retired\' AND %s - "lastVerified" > 28 ORDER BY "lastVerified" ASC LIMIT %s);', (machineName, time.strftime("%Y%m%d"), verifyLimit))
+  for record in cur:
+    oldHost = record[0]
+    if oldHost == machineName:
+      verify(cur, machineName, record[3], "Host has not been verified in over 28 days", DEBUG)
 
 ### SUBROUTINES ###
 
-# verify("hostname", "reason", "storageSystemId" ) - run verifies and update database
-sub verify {
-    my $verifyHost = shift;
-    my $reason = shift;
-    my $storageSystemId = shift;
+def verify(cur, machineName, systemId, reason, DEBUG):
+  dbg(reason, DEBUG)
+  dbg("Time to verify", DEBUG)
+  dbg("Starting verifies:\t%s" % START_SCRIPT, DEBUG)
+  # send info on decision to syslog
+  syslog.syslog(reason)
+  # execute the verify command
+  retVal = os.system(START_SCRIPT)
 
-    dbg("Time to verify");
-    dbg("Starting verifies:\t\"$START_SCRIPT\"");
-    # send info on decision to syslog
-    syslog('info', "$reason");
-    # execute the verify command
-    system("$START_SCRIPT");
+  # If the verify was successful then update the 'storageSystems' table with the current date
+  if retVal == 0:
+    dbg("Started verifies on %s" % machineName, DEBUG)
+    syslog.syslog("Started verifies on %s" % machineName)
 
-    # If the start verify worked, then update the last verified date
-    if( $? == 0 ) {
-      dbg("Started verifies on $verifyHost");
-      syslog('info', "Started verifies on $verifyHost");
-      # insert updated last verified date into the database
-      # Have to have a DBI->connect here for SL5 or prepare fails.  Seemed
-      # to work on SL4.  New Perl Version?  This code tested on SL4 and it
-      # works OK.
-      dbg("Connecting to the database");
-      $dbh = DBI->connect("dbi:Pg:", '', '') || gracefulDeath("Could not connect to database", 201);
-      $sth = $dbh->prepare(qq{
-        UPDATE "storageSystems" SET "lastVerified" = ? WHERE "id" = ?
-      }) || gracefulDeath("Could not prepare verify date update query", 206);
-      $sth->execute("$today", $storageSystemId) || gracefulDeath("Could not execute verify date update query", 207);
+    cur.execute('UPDATE "storageSystems" SET "lastVerified" = %s WHERE "id" = %s', (time.strftime("%Y-%m-%d"), systemId))
+  else:
+    gracefulDeath("Error starting verifies on %s" % machineName , 1)
 
-    }
-    else {
-      gracefulDeath("Error starting verifies on $hostname", 208);
-    }
-}
+def usage():
+  print "tavs-schedule-verify usage:\n"
+  print "  -d             : turn on debug messages\n"
+  print "  -f             : force verify and update DB.  Useful after intervention.\n"
+  print "  -n <host name> : short host name (optional, script will guess it otherwise)\n"
+  print "  -S             : Do not sleep before contacting DB.  Use when run interactively.\n"
+  print "  -h, -?         : display this usage message and exit.\n\n"
 
-# usage() - prints usage message and exits
-sub usage {
-  print "tavs-schedule-verify usage:\n";
-  print "  -d             : turn on debug messages\n";
-  print "  -f             : force verify and update DB.  Useful after intervention.\n";
-  print "  -n <host name> : short host name (optional, script will guess it otherwise)\n";
-  print "  -S             : Do not sleep before contacting DB.  Use when run interactively.\n";
-  print "  -h, -?         : display this usage message and exit.\n\n";
-
-  exit 1;
-}
-
-# dbg() - prints message to standard error if debugging is on
-sub dbg {
-  if ( $DEBUG ) {
+def dbg(msg, DEBUG):
+  if ( DEBUG ):
     # print to STDERR
-    select(STDERR);
-    print "----\n";
-    print "$_[0]\n";
-    print "----\n";
-    # select STDOUT again, just in case.
-    select(STDOUT);
-  }
-}
+    sys.stderr.write(msg + "\n")
 
-# gracefulDeath() - print message to STDERR and then exit with given exit code
-sub gracefulDeath {
+def gracefulDeath(errorMsg, exitCode):
   # print to STDERR
-  select(STDERR);
-  print "----\n";
-  print "$_[0]\n";
-  print "----\n";
-  syslog('err', "$_[0]");
-  exit $_[1];
-}
+  sys.stderr.write("----\n")
+  sys.stderr.write(errorMsg + " \n")
+  sys.stderr.write("----\n")
+  syslog.syslog('err' + errorMsg);
+  sys.exit(1)
+
+if __name__ == "__main__":
+  main()
