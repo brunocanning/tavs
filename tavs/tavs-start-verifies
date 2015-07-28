@@ -1,4 +1,4 @@
-  #!/usr/bin/env bash
+#!/usr/bin/env bash
 #
 # tavs-start-verifies
 # -------------------
@@ -62,10 +62,9 @@ elif [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
   # Make sure the time is set correctly
   # Some new drives are preconfigured with the wrong time zone
   $CLI -AdpSetTime 'date +%Y%m%d' 'date +%H:%H:%S' -aALL -NoLog
-  #Schedule an immediate consistency check on all arrays
-  $CLI -AdpCcSched -ModeSeq -aALL
-  $CLI -AdpCcSched -SetDelay 0 -aALL
-  $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL
+  $CLI -AdpCcSched -ModeSeq -aALL   # Set the verify mode to sequential
+  $CLI -AdpCcSched -SetDelay 0 -aALL  # Set the execution delay to 0
+  $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL  # Run a consistency check in the next hour
   exit 0
 else
   echo "Could not find a working CLI"
