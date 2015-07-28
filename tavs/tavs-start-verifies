@@ -48,22 +48,22 @@ elif [ -x /sbin/areca_cli ]; then
   done
   exit 0
 elif [ -x /usr/local/bin/arcconf ]; then
-  CLI="/usr/local/bin/arcconf"
+  CLI="/usr/StorMan/arcconf"
   # Adaptec controller:
   # Set background tsk priority to low:
   $CLI setpriority 1 LOW
   for logdev in $(arcconf getconfig 1 ld | grep 'Logical device number' | cut -f 4 -d" "); do
     $CLI task start 1 logicaldrive $logdev verify noprompt
   done
-  exit 0
 elif [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
   CLI="/opt/MegaRAID/MegaCli/MegaCli64"
   # LSI RAID Controller
   # Make sure the time is set correctly
   # Some new drives are preconfigured with the wrong time zone
-  $CLI -AdpSetTime $(date +%Y%m%d) $(date +%H:%M:%S) -aALL -NoLog
+  $CLI -AdpSetTime 'date +%Y%m%d' 'date +%H:%H:%S' -aALL -NoLog
   #Schedule an immediate consistency check on all arrays
-  $CLI -AdpCcSched -SetSTartTime $(date +%Y%m%d) $(date +%H) -aALL
+  #TODO: Verify each adapter sequentially not simultaneously
+  $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL
 else
   echo "Could not find a working CLI"
   exit 1
