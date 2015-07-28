@@ -121,7 +121,7 @@ def main():
     cur.execute('SELECT "machineName", "storageSystemId" FROM "vCastor5" WHERE "machineName" = %s', (machineName,))
     storageSystemId = cur.fetchone()[1]
     verify(cur, machineName, storageSystemId, "Verify forced", logfile, DEBUG)
-    exit(1)
+    exit(0)
 
   print("Disk Fraction: %i" % diskFraction)
   cur.execute('SELECT ( COUNT ("diskPool") / %s ) AS "verifyLimit" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s);', (diskFraction, machineName))
