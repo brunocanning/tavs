@@ -17,7 +17,6 @@ import getopt
 import os
 import time
 import psycopg2
-import syslog
 import socket
 
 ### CONSTANTS ###
@@ -31,11 +30,14 @@ def main():
   ### LOCAL VARIABLES ###
   today = time.strftime("%d%m%Y")
 
+  # User defined variables
   hostname = ""
   username = ""
   password = ""
   dbname = ""
   machineName = ""
+  force = False
+  logName = "/var/log/tavs.log"
   diskFraction = 5
   DEBUG = False
   noSleep = False
@@ -48,20 +50,25 @@ def main():
   elif os.path.isfile("/usr/local/etc/pg_service.conf"):
     filepath = "/usr/local/etc/pg_service.conf"
   else:
-    gracefulDeath("Unable to find configuration file pg_service.conf", 1)
+    gracefulDeath("Unable to find configuration file pg_service.conf", logfile, 1)
 
   config = open(filepath, "r")
   for line in config:
-    if line[0] == '#' or line[0] == '[': continue 
+    if line[0] == '#' or line[0] == '[': continue
     entry = line.split('=', 1)
-    if entry[0] == "host": hostname = entry[1].rstrip()
-    elif entry[0] == "user": username = entry[1].rstrip()
-    elif entry[0] == "password": password = entry[1].rstrip()
-    elif entry[0] == "port": port = entry[1].rstrip()
-    elif entry[0] == "dbname": dbname = entry[1].rstrip()
-    elif entry[0] == "diskfrac": diskFraction = int(entry[1].rstrip())
+    # Strip is used to remove all spaces and carriage return characters
+    if entry[0].strip() == "host": hostname = entry[1].strip(' \n')
+    elif entry[0].strip() == "user": username = entry[1].strip(' \n')
+    elif entry[0].strip() == "password": password = entry[1].strip(' \n')
+    elif entry[0].strip() == "port": port = entry[1].strip(' \n')
+    elif entry[0].strip() == "dbname": dbname = entry[1].strip(' \n')
+    elif entry[0].strip() == "diskfrac": diskFraction = int(entry[1].strip(' \n'))
+    elif entry[0].strip() == "log": logName = entry[1].strip(' \n')
 
   config.close()
+
+  # Open log file
+  logfile = open(logName, "a+")
 
   # get command line options
   #   -d             : debug
@@ -77,18 +84,17 @@ def main():
     elif opt == "-d":
       DEBUG = True
       dbg("Debugging is turned on", DEBUG);
-    elif opt == "-f":
-      verify(hostname, "-f specified, forcing verify and updating database", "Verify forced")
-      sys.exit(0)
     elif opt == "-S":
       noSleep = True
+    elif opt == "-f":
+      force = True
     elif opt == "-n":
       lastOpt = opt
       continue
     elif lastOpt == "-n":
       machineName = opt
     else:
-      gracefulDeath("Invalid option passed at the command line", 1)
+      gracefulDeath("Invalid option passed at the command line", logfile, 1)
       usage()
 
     lastOpt = opt
@@ -110,6 +116,13 @@ def main():
   connection = psycopg2.connect("dbname=%s user=%s password=%s host=%s" % (dbname, username, password, hostname))
   cur = connection.cursor()
 
+  # If force has been specified then run a check now and exit
+  if force == True:
+    cur.execute('SELECT "machineName", "storageSystemId" FROM "vCastor5" WHERE "machineName" = %s', (machineName,))
+    storageSystemId = cur.fetchone()[1]
+    verify(cur, machineName, storageSystemId, "Verify forced", logfile, DEBUG)
+    exit(1)
+
   print("Disk Fraction: %i" % diskFraction)
   cur.execute('SELECT ( COUNT ("diskPool") / %s ) AS "verifyLimit" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s);', (diskFraction, machineName))
   verifyLimit = cur.fetchone()[0]
@@ -123,30 +136,34 @@ def main():
     verifyLimit += 1
 
   cur.execute('SELECT "machineName", "diskPool", "lastVerified", "storageSystemId" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s AND "currentStatus" <> \'Intervention\' AND "currentStatus" <> \'Decomissioned\' AND %s - "lastVerified" > 28 ORDER BY "lastVerified" ASC LIMIT %s);', (machineName, time.strftime("%Y%m%d"), verifyLimit))
+
   for record in cur:
     oldHost = record[0]
     if oldHost == machineName:
-      verify(cur, machineName, record[3], "Host has not been verified in over 28 days", DEBUG)
+      verify(cur, machineName, record[3], "Host has not been verified in over 28 days", logfile, DEBUG)
+
+  # Close log file
+  logfile.close()
 
 ### SUBROUTINES ###
 
-def verify(cur, machineName, systemId, reason, DEBUG):
+def verify(cur, machineName, storageSystemId, reason, logfile, DEBUG):
   dbg(reason, DEBUG)
   dbg("Time to verify", DEBUG)
   dbg("Starting verifies:\t%s" % START_SCRIPT, DEBUG)
-  # send info on decision to syslog
-  syslog.syslog(reason)
+  # send info on decision to the log file
+  writeToLog("%s" % reason, logfile)
   # execute the verify command
   retVal = os.system(START_SCRIPT)
 
   # If the verify was successful then update the 'storageSystems' table with the current date
   if retVal == 0:
     dbg("Started verifies on %s" % machineName, DEBUG)
-    syslog.syslog("Started verifies on %s" % machineName)
+    writeToLog("Started verifies on %s" % machineName, logfile)
 
-    cur.execute('UPDATE "storageSystems" SET "lastVerified" = %s WHERE "id" = %s', (time.strftime("%Y-%m-%d"), systemId))
+    cur.execute('UPDATE "storageSystems" SET "lastVerified" = %s WHERE "id" = %s', (time.strftime("%Y-%m-%d"), storageSystemId))
   else:
-    gracefulDeath("Error starting verifies on %s" % machineName , 1)
+    gracefulDeath("Error starting verifies on %s" % machineName, logfile, 1)
 
 def usage():
   print "tavs-schedule-verify usage:\n"
@@ -161,13 +178,16 @@ def dbg(msg, DEBUG):
     # print to STDERR
     sys.stderr.write(msg + "\n")
 
-def gracefulDeath(errorMsg, exitCode):
+def gracefulDeath(errorMsg, logfile, exitCode):
   # print to STDERR
   sys.stderr.write("----\n")
-  sys.stderr.write(errorMsg + " \n")
+  sys.stderr.write("%s\n" % errorMsg)
   sys.stderr.write("----\n")
-  syslog.syslog('err' + errorMsg);
+  writeToLog('ERROR: ' + errorMsg, logfile);
   sys.exit(1)
+
+def writeToLog(msg, logfile):
+  logfile.write("[%s]: %s\n" % (time.strftime("%d/%m/%Y"), msg))
 
 if __name__ == "__main__":
   main()
