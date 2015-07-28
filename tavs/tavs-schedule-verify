@@ -52,6 +52,7 @@ def main():
 
   config = open(filepath, "r")
   for line in config:
+    if line[0] == '#' or line[0] == '[': continue 
     entry = line.split('=', 1)
     if entry[0] == "host": hostname = entry[1].rstrip()
     elif entry[0] == "user": username = entry[1].rstrip()
