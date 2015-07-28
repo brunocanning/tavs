@@ -64,6 +64,7 @@ elif [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
   $CLI -AdpSetTime 'date +%Y%m%d' 'date +%H:%H:%S' -aALL -NoLog
   #Schedule an immediate consistency check on all arrays
   $CLI -AdpCcSched -ModeSeq -aALL
+  $CLI -AdpCcSched -SetDelay 0 -aALL
   $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL
   exit 0
 else
