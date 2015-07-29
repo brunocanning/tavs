@@ -95,8 +95,8 @@ def main():
     elif lastOpt == "-n":
       machineName = opt
     else:
-      gracefulDeath("Invalid option passed at the command line", logfile, 1)
       usage()
+      gracefulDeath("Invalid option passed at the command line", logfile, 1)
 
     lastOpt = opt
 
