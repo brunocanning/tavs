@@ -16,6 +16,7 @@ import sys
 import os
 import time
 import psycopg2
+import optparse
 import socket
 
 ### CONSTANTS ###
@@ -60,6 +61,7 @@ def main():
     
     if len(entry) == 1:
       continue
+
     arg = entry[0].strip()
     val = entry[1].strip(" \n")
     # Strip is used to remove all spaces and carriage return characters
@@ -82,28 +84,21 @@ def main():
   #   -S             : Do not sleep before contacting DB.
   #   -n             : The machine to run verifies on
   #   -h, -?         : display usage and exit
-  lastOpt = ""
-  for opt in sys.argv[1:]:
-    if opt in ("-h", "-?"):
-      usage()
-      sys.exit(1)
-    elif opt == "-d":
-      DEBUG = True
-      dbg("Debugging is turned on", DEBUG);
-    elif opt == "-S":
-      noSleep = True
-    elif opt == "-f":
-      force = True
-    elif opt == "-n":
-      lastOpt = opt
-      continue
-    elif lastOpt == "-n":
-      machineName = opt
-    else:
-      usage()
-      gracefulDeath("Invalid option passed at the command line", logfile, 1)
+  parser = optparse.OptionParser()
+  parser.add_option("-d", action="store_true", dest="DEBUG", default=False, help="Enable debug output")
+  parser.add_option("-f", action="store_true", dest="force", default=False, help="Force a consistency check on the specified machine")
+  parser.add_option("-S", action="store_true", dest="nosleep", default=False, help="Connect to the database without sleeping first")
+  parser.add_option("-n", action="store", dest="machineName", default="", help="Specifies the name of the current machine")
+  (options, args) = parser.parse_args()
 
-    lastOpt = opt
+  if options.DEBUG:
+    DEBUG = True
+  if options.force:
+    force = True
+  if options.nosleep:
+    noSleep = True
+  
+  machineName = options.machineName
 
   # If the user has not specified a machine name then try to derive it from
   # the host name.
@@ -183,8 +178,7 @@ def usage():
 
 def dbg(msg, DEBUG):
   if ( DEBUG ):
-    # print to STDERR
-    sys.stderr.write(msg + "\n")
+    sys.stderr.write("%s\n" % msg)
 
 def gracefulDeath(errorMsg, logfile, exitCode):
   # print to STDERR
