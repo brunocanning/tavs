@@ -89,7 +89,7 @@ def main():
   parser.add_option("-d", action="store_true", dest="DEBUG", default=False, help="Enable debug output")
   parser.add_option("-f", action="store_true", dest="force", default=False, help="Force a consistency check on the specified machine")
   parser.add_option("-S", action="store_true", dest="nosleep", default=False, help="Connect to the database without sleeping first")
-  parser.add_option("-n", action="store", dest="machineName", default="", help="Specifies the name of the current machine")
+  parser.add_option("-n", action="store", dest="machineName", default="", help="Specifies the name of the current machine. This is the short host name in magDB.")
   (options, args) = parser.parse_args()
 
   if options.DEBUG:
