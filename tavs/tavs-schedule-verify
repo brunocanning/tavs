@@ -36,6 +36,7 @@ def main():
   password = ""
   dbname = ""
   machineName = ""
+  port = ""
   force = False
   logName = "/var/log/tavs.log"
   diskFraction = 5
@@ -105,18 +106,18 @@ def main():
   if machineName == "":
     machineName = socket.gethostname().split(".", 1)[0]
 
-  dbg("Today's date is %s" % time.strftime("%d/%m/%Y"), DEBUG)
-  dbg("My hostname is %s" % machineName, DEBUG)
+  debug("Today's date is %s" % time.strftime("%d/%m/%Y"), DEBUG)
+  debug("My hostname is %s" % machineName, DEBUG)
 
   if noSleep == False:
     # If we're running normally, we need to sleep for a while to avoid overloading
     # the DB, unless the -S option was specified (no sleep).
-    dbg("Sleeping for 5 seconds to avoid loading the DB...", DEBUG)
+    debug("Sleeping for 5 seconds to avoid loading the DB...", DEBUG)
     time.sleep(5)
 
   # Connect to the database
-  dbg("Connecting to the database", DEBUG)
-  connection = psycopg2.connect("dbname=%s user=%s password=%s host=%s" % (dbname, username, password, hostname))
+  debug("Connecting to the database", DEBUG)
+  connection = psycopg2.connect("dbname=%s user=%s password=%s host=%s port=%s" % (dbname, username, password, hostname, port))
   cur = connection.cursor()
 
   # If force has been specified then run a check now and exit
@@ -126,16 +127,16 @@ def main():
     verify(cur, machineName, storageSystemId, "Verify forced", logfile, DEBUG)
     exit(0)
 
-  print("Disk Fraction: %i" % diskFraction)
+  debug("Disk Fraction: %i" % diskFraction, DEBUG)
   cur.execute('SELECT ( COUNT ("diskPool") / %s ) AS "verifyLimit" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s);', (diskFraction, machineName))
   verifyLimit = cur.fetchone()[0]
 
-  dbg("verifyLimit: %i" % verifyLimit, DEBUG)
+  debug("verifyLimit: %i" % verifyLimit, DEBUG)
 
   # get result and set the limit on the number of concurrent verifies
   # verifyLimit must be at least 1
   if verifyLimit == 0:
-    dbg("verifyLimit is zero, shifting to 1", DEBUG)
+    debug("verifyLimit is zero, shifting to 1", DEBUG)
     verifyLimit += 1
 
   cur.execute('SELECT "machineName", "diskPool", "lastVerified", "storageSystemId" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s AND "currentStatus" <> \'Intervention\' AND "currentStatus" <> \'Decomissioned\' AND %s - "lastVerified" > 28 ORDER BY "lastVerified" ASC LIMIT %s);', (machineName, time.strftime("%Y%m%d"), verifyLimit))
@@ -151,9 +152,9 @@ def main():
 ### SUBROUTINES ###
 
 def verify(cur, machineName, storageSystemId, reason, logfile, DEBUG):
-  dbg(reason, DEBUG)
-  dbg("Time to verify", DEBUG)
-  dbg("Starting verifies:\t%s" % START_SCRIPT, DEBUG)
+  debug(reason, DEBUG)
+  debug("Time to verify", DEBUG)
+  debug("Starting verifies:\t%s" % START_SCRIPT, DEBUG)
   # send info on decision to the log file
   writeToLog("%s" % reason, logfile)
   # execute the verify command
@@ -161,7 +162,7 @@ def verify(cur, machineName, storageSystemId, reason, logfile, DEBUG):
 
   # If the verify was successful then update the 'storageSystems' table with the current date
   if retVal == 0:
-    dbg("Started verifies on %s" % machineName, DEBUG)
+    debug("Started verifies on %s" % machineName, DEBUG)
     writeToLog("Started verifies on %s" % machineName, logfile)
 
     cur.execute('UPDATE "storageSystems" SET "lastVerified" = %s WHERE "id" = %s', (time.strftime("%Y-%m-%d"), storageSystemId))
@@ -176,7 +177,7 @@ def usage():
   print "  -S             : Do not sleep before contacting DB.  Use when run interactively.\n"
   print "  -h, -?         : display this usage message and exit.\n\n"
 
-def dbg(msg, DEBUG):
+def debug(msg, DEBUG):
   if ( DEBUG ):
     sys.stderr.write("%s\n" % msg)
 
