@@ -1,6 +1,6 @@
-#!/usr/bin/perl -w
+#!/usr/bin/python
 
-# tave-schedule-verify.pl
+# tave-schedule-verify
 # -----------------------
 # 
 # Part of the TAVS suite.
@@ -13,7 +13,6 @@
 # (c) Science and Technology Facilities Council
 
 import sys
-import getopt
 import os
 import time
 import psycopg2
@@ -45,12 +44,14 @@ def main():
 
   # Read the configuration file
   filepath = ""
-  if os.path.isfile("pg_service.conf"):
-    filepath = "pg_service.conf"
-  elif os.path.isfile("/usr/local/etc/pg_service.conf"):
+  # Check if the file exists
+  if os.path.isfile("/usr/local/etc/pg_service.conf"):
     filepath = "/usr/local/etc/pg_service.conf"
+  elif os.path.isfile("pg_service.conf"):
+    filepath = "pg_service.conf"
   else:
-    gracefulDeath("Unable to find configuration file pg_service.conf", logfile, 1)
+    print("Error: Can't find configuration file in /usr/local/pg_service.conf")
+    exit(1)
 
   config = open(filepath, "r")
   for line in config:
@@ -99,6 +100,8 @@ def main():
 
     lastOpt = opt
 
+  # If the user has not specified a machine name then try to derive it from
+  # the host name.
   if machineName == "":
     machineName = socket.gethostname().split(".", 1)[0]
 
@@ -119,7 +122,7 @@ def main():
   # If force has been specified then run a check now and exit
   if force == True:
     cur.execute('SELECT "machineName", "storageSystemId" FROM "vCastor5" WHERE "machineName" = %s', (machineName,))
-    storageSystemId = cur.fetchone()[1]
+    storageSystemId = cur.fetchone()[1] # The storageSystemId is the second entry
     verify(cur, machineName, storageSystemId, "Verify forced", logfile, DEBUG)
     exit(0)
 
