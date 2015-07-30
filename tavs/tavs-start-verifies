@@ -47,7 +47,7 @@ elif [ -x /sbin/areca_cli ]; then
     $CLI vsf check vol=${vol}
   done
   exit 0
-elif [ -x /usr/local/bin/arcconf ]; then
+elif [ -x /usr/StorMan/arcconf ]; then
   CLI="/usr/StorMan/arcconf"
   # Adaptec controller:
   # Set background tsk priority to low:
