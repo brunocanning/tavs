@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# tave-schedule-verify
+# tavs-schedule-verify
 # -----------------------
 # 
 # Part of the TAVS suite.
@@ -47,12 +47,12 @@ def main():
   # Read the configuration file
   filepath = ""
   # Check if the file exists
-  if os.path.isfile("/usr/local/etc/pg_service.conf"):
-    filepath = "/usr/local/etc/pg_service.conf"
+  if os.path.isfile("/etc/sysconfig/pgsql/pg_service.conf"):
+    filepath = "/etc/sysconfig/pgsql/pg_service.conf"
   elif os.path.isfile("pg_service.conf"):
     filepath = "pg_service.conf"
   else:
-    print("Error: Can't find configuration file in /usr/local/etc/pg_service.conf")
+    print("Error: Can't find configuration file in /etc/sysconfig/pgsql/pg_service.conf")
     exit(1)
 
   config = open(filepath, "r")
