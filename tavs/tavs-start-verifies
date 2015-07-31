@@ -52,7 +52,7 @@ elif [ -x /usr/StorMan/arcconf ]; then
   # Adaptec controller:
   # Set background tsk priority to low:
   $CLI setpriority 1 LOW
-  for logdev in $(arcconf getconfig 1 ld | grep 'Logical device number' | cut -f 4 -d" "); do
+  for logdev in $($CLI getconfig 1 ld | grep 'Logical device number' | cut -f 4 -d" "); do
     $CLI task start 1 logicaldrive $logdev verify noprompt
   done
   exit 0
