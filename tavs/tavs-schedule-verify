@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# tave-schedule-verify
+# tavs-schedule-verify
 # -----------------------
 # 
 # Part of the TAVS suite.
@@ -21,8 +21,8 @@ import socket
 
 ### CONSTANTS ###
 
-BINDIR = "/usr/local/sbin";
-START_SCRIPT = BINDIR + "/tavs-start-verifies";
+BINDIR = "/usr/local/sbin"
+START_SCRIPT = BINDIR + "/tavs-start-verifies"
 
 ### PROGRAM ###
 
@@ -52,7 +52,7 @@ def main():
   elif os.path.isfile("pg_service.conf"):
     filepath = "pg_service.conf"
   else:
-    print("Error: Can't find configuration file in /usr/local/etc/pg_service.conf")
+    print("Error: Can't find configuration file in /etc/sysconfig/pgsql/pg_service.conf")
     exit(1)
 
   config = open(filepath, "r")
@@ -173,7 +173,6 @@ def verify(cur, machineName, storageSystemId, reason, logfile, DEBUG):
 
     cur.execute('UPDATE "storageSystems" SET "lastVerified" = CURRENT_DATE WHERE "id" = %s', (storageSystemId,))
     debug("\n%s\n" % cur.statusmessage, DEBUG)
-    cur.execute('SELECT ("lastVerified", "id") FROM "storageSystems" WHERE "id" = %s', (storageSystemId,))
   else:
     gracefulDeath("Error starting verifies on %s" % machineName, logfile, 1)
 
