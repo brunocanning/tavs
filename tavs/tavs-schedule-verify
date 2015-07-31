@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# tavs-schedule-verify
+# tave-schedule-verify
 # -----------------------
 # 
 # Part of the TAVS suite.
@@ -21,8 +21,8 @@ import socket
 
 ### CONSTANTS ###
 
-BINDIR = "/usr/local/sbin"
-START_SCRIPT = BINDIR + "/tavs-start-verifies"
+BINDIR = "/usr/local/sbin";
+START_SCRIPT = BINDIR + "/tavs-start-verifies";
 
 ### PROGRAM ###
 
@@ -52,7 +52,7 @@ def main():
   elif os.path.isfile("pg_service.conf"):
     filepath = "pg_service.conf"
   else:
-    print("Error: Can't find configuration file in /etc/sysconfig/pgsql/pg_service.conf")
+    print("Error: Can't find configuration file in /usr/local/etc/pg_service.conf")
     exit(1)
 
   config = open(filepath, "r")
@@ -141,12 +141,18 @@ def main():
 
   cur.execute('SELECT "machineName", "diskPool", "lastVerified", "storageSystemId" FROM "vCastor5" WHERE "diskPool" = (SELECT "diskPool" FROM "vCastor5" WHERE "machineName" = %s AND "currentStatus" <> \'Intervention\' AND "currentStatus" <> \'Decomissioned\' AND %s - "lastVerified" > 28 ORDER BY "lastVerified" ASC LIMIT %s);', (machineName, time.strftime("%Y%m%d"), verifyLimit))
 
-  for record in cur:
+  if (cur.rowcount) == 0:
+    debug("This machine is not currently in need of verifying", DEBUG)
+
+  for i in range(cur.rowcount - 1):
+    record = cur.fetchone()
     oldHost = record[0]
     if oldHost == machineName:
       verify(cur, machineName, record[3], "Host has not been verified in over 28 days", logfile, DEBUG)
 
-  # Close log file
+  # Close open connections
+  connection.commit()   # We must commit our changes otherwise psycopg just reverts them on close!
+  connection.close()
   logfile.close()
 
 ### SUBROUTINES ###
@@ -165,7 +171,9 @@ def verify(cur, machineName, storageSystemId, reason, logfile, DEBUG):
     debug("Started verifies on %s" % machineName, DEBUG)
     writeToLog("Started verifies on %s" % machineName, logfile)
 
-    cur.execute('UPDATE "storageSystems" SET "lastVerified" = %s WHERE "id" = %s', (time.strftime("%Y-%m-%d"), storageSystemId))
+    cur.execute('UPDATE "storageSystems" SET "lastVerified" = CURRENT_DATE WHERE "id" = %s', (storageSystemId,))
+    debug("\n%s\n" % cur.statusmessage, DEBUG)
+    cur.execute('SELECT ("lastVerified", "id") FROM "storageSystems" WHERE "id" = %s', (storageSystemId,))
   else:
     gracefulDeath("Error starting verifies on %s" % machineName, logfile, 1)
 
