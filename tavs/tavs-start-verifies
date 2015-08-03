@@ -61,10 +61,21 @@ elif [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
   # LSI RAID Controller
   # Make sure the time is set correctly
   # Some new drives are preconfigured with the wrong time zone
-  $CLI -AdpSetTime 'date +%Y%m%d' 'date +%H:%H:%S' -aALL -NoLog
-  $CLI -AdpCcSched -ModeSeq -aALL   # Set the verify mode to sequential
-  $CLI -AdpCcSched -SetDelay 0 -aALL  # Set the execution delay to 0
-  $CLI -AdpCcSched -SetSTartTime 'date +%Y%m%d' 'date +%H' -aALL  # Run a consistency check in the next hour
+  $CLI -AdpSetTime `date +%Y%m%d` `date +%H:%H:%S` -aALL -NoLog
+  $CLI -AdpCcSched -Dsbl -aALL
+  $CLI -LDCC -Abort -LAll -aALL
+  for adp in $($CLI -LDInfo -LAll -aALL | grep "Adapter" | cut -f 2 -d " "); do
+    for vol in $($CLI -LDInfo -LAll -a$adp | grep "Virtual Drive:" | cut -f 3 -d " "); do
+      $CLI -LDCC -Start -L$vol -a$adp
+      $CLI -LDInfo -L$vol -a$adp | grep "Check Consistency"
+      # When grep can no longer find the consistency check we continue
+      # to the next logical drive
+      while (($? == 0)); do
+        sleep 10m
+        $CLI -LDInfo -L$vol -a$adp | grep "Check Consistency"
+      done
+    done
+  done
   exit 0
 else
   echo "Could not find a working CLI"
