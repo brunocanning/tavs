@@ -125,6 +125,7 @@ def main():
     cur.execute('SELECT "machineName", "storageSystemId" FROM "vCastor5" WHERE "machineName" = %s', (machineName,))
     storageSystemId = cur.fetchone()[1] # The storageSystemId is the second entry
     verify(cur, machineName, storageSystemId, "Verify forced", logfile, DEBUG)
+    connection.commit()
     exit(0)
 
   debug("Disk Fraction: %i" % diskFraction, DEBUG)
@@ -152,7 +153,6 @@ def main():
 
   # Close open connections
   connection.commit()   # We must commit our changes otherwise psycopg just reverts them on close!
-  connection.close()
   logfile.close()
 
 ### SUBROUTINES ###
